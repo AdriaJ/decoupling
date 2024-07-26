@@ -1,0 +1,39 @@
+High Foreground-Background ratio:
+	Low noise:	477
+	Medium noise:	784
+	High Noise:	868
+Medium Foreground-Background ratio:
+	Low noise:	392
+	Medium noise:	706
+	High Noise:	148
+Low Foreground-Background ratio:
+	Low noise:	128
+	Medium noise:	459
+	High Noise:	545
+
+Outdated content:
+	low_noise_high_fg (742)
+	medium_noise_high_fg (283)
+	
+Labels: 1.1, 1.2, 1.3
+	2.1, 2.2, 2.3
+	3.1, 3.2, 3.3
+-----------------------------------
+
+Quality of reconstruction:
+	- 1.x and 2.x are still good reconstrucitn, 3.x do not work
+	- 1.3 starts to mess up, not as good as the other ones but still pretty decent
+	- even 2.3 is fairly well recovered (the background is quite nice is this scenario)
+	- 3.1 is not recovering good, two explanations:
+		- the backgroudn si quite nasty
+		- the set of parameters is not properly adapted
+			-> I could try lambda2 lower and lambda1 higher
+	- 3.2 works actually better
+	- 3.3 suffers from the same limitations as 3.2, may be improved with a change of parameters
+	
+	- Overall, in many cases some medium to low intensity peaks are sometimes discarded.
+	- The location of the recovered peak is often excellent, even when peaks are very close to each other.
+	- The intensity of the recovered peaks may be wrong, sometimes by a lot. Sometimes, high intensityu peaks become less intense than medium intensity ones.
+	- For a fix lambda1, varying lambda2 can be helpful to identify the number of peaks to recover as well as their exact location.
+	
+	- LASSO is consistently outperformed by composite problems.
