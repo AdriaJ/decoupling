@@ -17,6 +17,8 @@ import scipy.signal as sig
 from pyxu.opt.stop import RelError, MaxIter
 from pyxu.abc import QuadraticFunc
 import pyxu.util as pxu
+from matplotlib import use
+use("Qt5Agg")
 
 #image model
 seed = 1
@@ -31,15 +33,17 @@ ongrid = True
 # measurement model
 kernel_std = 5  # Gaussian kernel std
 kernel_width = 3 * 2 * kernel_std + 1  # Length of the Gaussian kernel
-snrdb_meas = 60
+snrdb_meas = 20
 norm_meas = (np.sqrt(2 * np.pi) * kernel_std)
 
 # regularization
 # kernel_std_regul = kernel_std / 2
 # norm_regul = (np.sqrt(2 * np.pi) * kernel_std_regul)
-lambda1_factor = 0.3
-lambda2 = 1e-4
+lambda1_factor = 0.2
+lambda2 = 1e-3
 eps = 1e-5
+
+blasso_factor = 0.3
 
 if __name__ == "__main__":
     if seed is None:
@@ -127,7 +131,10 @@ if __name__ == "__main__":
 
     plt.figure(figsize=(10, 10))
     plt.subplot(211)
-    plt.stem(x)
+    # plt.stem(x)
+    plt.stem(np.arange(img.shape[0])[img != 0], img[img != 0], basefmt="C0--")
+    plt.stem([0, Ngrid-1], [0, 0], markerfmt='white', basefmt='C0--')
+    plt.plot(np.arange(Ngrid), background)# c='orange',)
     plt.title("Original image (with background)")
     plt.subplot(212)
     plt.stem(y)
@@ -218,45 +225,64 @@ if __name__ == "__main__":
     tmp[ds_factor//2::ds_factor] = Mresiduals
     x2 = np.convolve(tmp, kernel_measurement, mode='same') / lambda2
 
-    # plt.figure()
-    # plt.stem(y - Hop(x1))
-    # plt.show()
+    # ---------------
+
+    print("BLASSO reconstruction...")
+    lambda_max = np.abs(Hop.adjoint(y).ravel()).max()
+    lambda1 = blasso_factor * lambda_max
+    regul = lambda1 * pxop.PositiveL1Norm(Ngrid)
+    loss = pxop.SquaredL2Norm(Nmeas).asloss(y) * Hop
+
+    pgd = pxls.PGD(loss, g=regul, show_progress=False)
+    start = time.time()
+    pgd.fit(x0=np.zeros(Ngrid), stop_crit=stop_crit)
+    blasso_time = time.time() - start
+
+    x_blasso = pgd.solution()
+
+    # ---------------
 
     plt.figure(figsize=(12, 11))
     plt.suptitle(rf"$\lambda_1$ factor : {lambda1:.2e}, $\lambda_2$ : {lambda2:.2e}")
     ylim = max(img.max(), x1.max())
-    plt.subplot(421)
+    # plt.subplot(421)
+    plt.subplot(321)
     plt.ylim(top=1.05 * ylim)
-    plt.stem(img)
+    plt.stem(np.arange(img.shape[0])[img != 0], img[img != 0])
+    plt.stem([0, Ngrid-1], [0, 0], markerfmt='white')
     plt.title("Source foreground")
-    plt.subplot(422)
+    # plt.subplot(422)
+    plt.subplot(322)
     plt.ylim(top=1.05 * ylim)
-    plt.stem(x1)
+    plt.stem(np.arange(x1.shape[0])[x1 != 0], x1[x1 != 0])
+    plt.stem([0, Ngrid-1], [0, 0], markerfmt='white')
     plt.title("Recovered foreground")
 
     ylim = max(background.max(), x2.max())
-    plt.subplot(423)
+    # plt.subplot(423)
+    plt.subplot(323)
     plt.ylim(top=1.05 * ylim)
     # plt.stem(background)
-    plt.scatter(np.arange(Ngrid), background, c='orange', marker='.')
+    plt.plot(np.arange(Ngrid), background, c='orange',)  # marker='.')
     plt.title("Source background")
-    plt.subplot(424)
+    # plt.subplot(424)
+    plt.subplot(324)
     plt.ylim(top=1.05 * ylim)
     # plt.stem(x2)
-    plt.scatter(np.arange(Ngrid), x2, c='orange', marker='.')
+    plt.plot(np.arange(Ngrid), x2, c='orange',)  # marker='.')
     plt.title("Recovered background")
 
-    ylim = max(x.max(), (x1 + x2).max())
-    plt.subplot(425)
-    plt.ylim(top=1.05 * ylim)
-    plt.stem(x)
-    plt.scatter(np.arange(Ngrid), background, c='orange', marker='.', zorder=9)
-    plt.title("Source signal")
-    plt.subplot(426)
-    plt.ylim(top=1.05 * ylim)
-    plt.stem(x1 + x2)
-    plt.scatter(np.arange(Ngrid), x2, c='orange', marker='.', zorder=9)
-    plt.title("Recovered signal")
+    # ylim = max(x.max(), (x1 + x2).max())
+    # plt.subplot(425)
+    # plt.ylim(top=1.05 * ylim)
+    # plt.stem(img)
+    # plt.plot(np.arange(Ngrid), background, c='orange', zorder=9)  # , marker='.'
+    # plt.title("Source signal")
+    # plt.subplot(426)
+    # plt.ylim(top=1.05 * ylim)
+    # plt.stem(x1)
+    # plt.plot(np.arange(Ngrid), x2, c='orange', zorder=9)  # , marker='.'
+    # plt.title("Recovered signal")
 
     # measurement fidelity
 
@@ -265,26 +291,34 @@ if __name__ == "__main__":
     sol_meas = (measx1 + measx2)[ds_factor//2::ds_factor]
 
     ylim = max(y.max(), sol_meas.max())
-    plt.subplot(427)
+    # plt.subplot(427)
+    plt.subplot(325)
     plt.ylim(top=1.05 * ylim)
     plt.stem(y)
     plt.title("Measurements")
-    plt.subplot(428)
+    # plt.subplot(428)
+    plt.subplot(326)
     plt.ylim(top=1.05 * ylim)
     plt.stem(sol_meas)
     plt.title("Measurements on the solution")
 
     plt.show()
 
+    plt.figure(figsize=(6, 6))
+    plt.stem(x_blasso)
+    plt.show()
+    # plt.scatter(np.arange(Ngrid), x_blasso, label="BLASSO")
+
     repr_std = 1.5
     representation_kernel = 1/(np.sqrt(2 * np.pi * repr_std**2)) * np.exp(-0.5 * np.arange(-3 * repr_std, 3 * repr_std + 1)**2 / repr_std**2)
 
-    fig = plt.figure(figsize=(12, 11))
-    plt.suptitle("Foreground representation")
+    fig = plt.figure(figsize=(12, 16))
+    plt.suptitle("Foreground representation: convolution with a narrow Gaussian kernel")
     repr_source = np.convolve(img, representation_kernel, mode='same')
     repr_recovered = np.convolve(x1, representation_kernel, mode='same')
+    repr_blasso = np.convolve(x_blasso, representation_kernel, mode='same')
     ylim = max(repr_source.max(), repr_recovered.max())
-    axes = fig.subplots(2, 1, sharex=True)
+    axes = fig.subplots(3, 1, sharex=True)
     ax = axes[0]
     ax.set_ylim(top=1.05 * ylim)
     # ax.stem(repr_source)
@@ -295,9 +329,16 @@ if __name__ == "__main__":
     # ax.stem(repr_recovered)
     ax.plot(np.arange(Ngrid), repr_recovered, c='orange', marker='.')
     ax.set_title("Recovered foreground")
+    ax = axes[2]
+    ax.set_ylim(top=1.05 * ylim)
+    ax.plot(np.arange(Ngrid), repr_blasso, c='orange', marker='.')
+    ax.set_title("BLASSO foreground")
     plt.show()
 
-    print(f"Relative L2 error on the foreground: {np.linalg.norm(repr_recovered - repr_source)/np.linalg.norm(repr_source):.2f}")
+    print(f"Relative L2 error on the foreground:")
+    print(f"\tComposite: {np.linalg.norm(repr_recovered - repr_source)/np.linalg.norm(repr_source):.2f}")
+    print(f"\tBLASSO: {np.linalg.norm(repr_blasso - repr_source)/np.linalg.norm(repr_source):.2f}")
+
 
     l1_value = lambda1 * np.abs(x1).sum()
     print(f"Value of the foreground regularization at convergence: {l1_value:.3e}")
@@ -309,6 +350,17 @@ if __name__ == "__main__":
     # Wasserstein distance between siomulated source and sparse reconstructin, using scipy
     from scipy.stats import wasserstein_distance
     img_sum, x1_sum = img.sum(), x1.sum()
-    print(f"Sum of source: {img_sum:.3f}, sum of recovered: {x1_sum:.3f}")
+    print(f"Sum of source: {img_sum:.3f}, sum of recovered: {x1_sum:.3f}, sum of BLASSO: {x_blasso.sum():.3f}")
+    print(f"Sum of source after convolution: {repr_source.sum():.3f}, sum of recovered: {repr_recovered.sum():.3f}, sum of BLASSO: {repr_blasso.sum():.3f}")
+
     wass_dist = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), img/img_sum, x1/x1_sum)
     print(f"Wasserstein distance between source and recovered: {wass_dist:.3f}")
+    # wasserstein distance with BLASSO
+    wass_dist_blasso = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), img/img_sum, x_blasso/x_blasso.sum())
+    print(f"Wasserstein distance between source and BLASSO: {wass_dist_blasso:.3f}")
+
+    #Wasserstein distance after convolution
+    wass_dist_repr = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), repr_source, repr_recovered)
+    print(f"Wasserstein distance between source and recovered (after convolution): {wass_dist_repr:.3f}")
+    wass_dist_repr_blasso = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), repr_source, repr_blasso)
+    print(f"Wasserstein distance between source and BLASSO (after convolution): {wass_dist_repr_blasso:.3f}")
