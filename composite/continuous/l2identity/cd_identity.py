@@ -3,6 +3,8 @@ Continuous-domain simulation.
 Forward operator is convolution with a Gaussian kernel, sampled on a coarse grid.
 Image model is sparse Dirac impulses and background made out of Gaussian kernels.
 No penalty operator, simply identity.
+
+Fixed background intensity, varying foreground with fgbgR.
 """
 
 import time
@@ -22,12 +24,11 @@ use("Qt5Agg")
 
 #image model
 seed = 1
-sbgrdb = 40
 Ngrid = 800
 ds_factor = 8
 Nmeas = Ngrid // ds_factor
-sparsity = 0.3
 k = 10
+fgbgR = 10.
 ongrid = True
 
 # measurement model
@@ -50,14 +51,12 @@ if __name__ == "__main__":
         seed = np.random.randint(1000)
     rng = np.random.default_rng(seed=seed)
 
-
     img = np.zeros((Ngrid,))
     if ongrid:
         Neff = int(.6 * Ngrid)
-        # k = int(Ngrid * sparsity)
         idx = rng.choice(Neff, k, replace=False)
         indices = idx + int(.2 * Ngrid)
-        img[indices] = rng.uniform(1, 10, k)
+        img[indices] = rng.uniform(1, fgbgR, k)
 
     # PSNR : 10 * np.log10(max(img)**2 / np.std(noise)**2) = 20 * log10(max(img) / std(noise))
     bg_impulses = np.zeros((Ngrid,))
@@ -73,12 +72,13 @@ if __name__ == "__main__":
         kernel_bg_1d /= norm_bg1d
         background = sig.fftconvolve(bg_impulses, kernel_bg_1d, mode='same')
 
-    power_img = np.max(img)**2  # np.sum(img**2) / img.size
-    target_power_noise = power_img * 10**(-sbgrdb / 10)
-    sigma = np.sqrt(target_power_noise)
+    # sbgrdb = 40
+    # power_img = np.max(img)**2  # np.sum(img**2) / img.size
+    # target_power_noise = power_img * 10**(-sbgrdb / 10)
+    # sigma = np.sqrt(target_power_noise)
     # downscaling_factor = sigma / np.std(background)
-    downscaling_factor = 1
-    background *= downscaling_factor
+    # downscaling_factor = 1
+    # background *= downscaling_factor
 
     # img *= 0.5
 
@@ -106,7 +106,7 @@ if __name__ == "__main__":
                       np.exp(-0.5 * ((np.arange(width_meas_bg) - (width_meas_bg - 1) / 2) ** 2) / std_meas_bg2))
     kernel_meas_bg /= (norm_meas * norm_bg1d)
 
-    conv_bg = downscaling_factor * np.convolve(np.pad(bg_impulses, (width_meas_bg//2, width_meas_bg//2), mode='wrap'),
+    conv_bg = np.convolve(np.pad(bg_impulses, (width_meas_bg//2, width_meas_bg//2), mode='wrap'),
                                                kernel_meas_bg, mode='valid')
     # assert conv_bg.shape == background.shape
     noiseless_y = (conv_fg + conv_bg)[ds_factor//2::ds_factor]
@@ -229,8 +229,8 @@ if __name__ == "__main__":
 
     print("BLASSO reconstruction...")
     lambda_max = np.abs(Hop.adjoint(y).ravel()).max()
-    lambda1 = blasso_factor * lambda_max
-    regul = lambda1 * pxop.PositiveL1Norm(Ngrid)
+    lambda_ = blasso_factor * lambda_max
+    regul = lambda_ * pxop.PositiveL1Norm(Ngrid)
     loss = pxop.SquaredL2Norm(Nmeas).asloss(y) * Hop
 
     pgd = pxls.PGD(loss, g=regul, show_progress=False)
@@ -239,6 +239,40 @@ if __name__ == "__main__":
     blasso_time = time.time() - start
 
     x_blasso = pgd.solution()
+
+    # ---------------
+
+    print("Non-decoupled composite reconstruction...")
+
+    Top = pxop.Convolve(
+        arg_shape=Nmeas,
+        kernel=[kernel_regul,],
+        center=[kernel_regul.shape[0]//2,],
+        mode="constant",
+        enable_warnings=True,
+    )
+
+    ndcp_loss = .5 * pxop.SquaredL2Norm(Nmeas).asloss(y.ravel()) * pxop.hstack([Hop, Top]) + \
+        lambda2 * pxop.hstack([pxop.NullFunc(Ngrid), QuadraticFunc((1, Nmeas), Q=Top)])
+    ndcp_regul = lambda1 * pxop.hstack([pxop.PositiveL1Norm(Ngrid), pxop.NullFunc(Nmeas)])
+
+    ndcp_stop = RelError(eps=eps, var="x", f= lambda v: v[:Ngrid], norm=2, satisfy_all=True,) & MaxIter(10)  # , f= lambda v: v[:Ngrid]
+
+
+    ndcp_pgd = pxls.PGD(ndcp_loss, g=ndcp_regul, show_progress=False)
+    start = time.time()
+    ndcp_pgd.fit(x0=np.zeros(Ngrid + Nmeas), stop_crit=stop_crit)
+    ndcp_time = time.time() - start
+
+    ndcp_sol, ndcp_hst = ndcp_pgd.stats()
+
+    x1_ndcp = ndcp_sol['x'][:Ngrid]
+    x2_innovations_ndcp = ndcp_sol['x'][Ngrid:]
+    x2_ndcp = np.zeros(Ngrid)
+    x2_ndcp[ds_factor//2::ds_factor] = x2_innovations_ndcp
+    x2_ndcp = np.convolve(np.pad(x2_ndcp, (kernel_width//2, kernel_width//2), mode='wrap'),
+                          kernel_measurement, mode='valid')
+    # print(np.allclose(x1_ndcp, 0))  # make sure the solution is non null
 
     # ---------------
 
@@ -304,39 +338,66 @@ if __name__ == "__main__":
 
     plt.show()
 
+    plt.figure(figsize=(6, 11))
+    plt.subplot(311)
+    ylim = max(img.max(), x1.max())
+    plt.ylim(top=1.05 * ylim)
+    plt.stem(np.arange(x1_ndcp.shape[0])[x1_ndcp != 0], x1_ndcp[x1_ndcp != 0])
+    plt.stem([0, Ngrid-1], [0, 0], markerfmt='white')
+    plt.title("Recovered foreground (non-decoupled)")
+    plt.subplot(312)
+    ylim = max(background.max(), x2.max())
+    plt.ylim(top=1.05 * ylim)
+    plt.plot(np.arange(Ngrid), x2_ndcp, c='orange',)  # marker='.')
+    plt.title("Recovered background (non-decoupled)")
+    plt.show()
+
+
     plt.figure(figsize=(6, 6))
     plt.stem(x_blasso)
+    plt.title("Reconstruction BLASSO")
     plt.show()
     # plt.scatter(np.arange(Ngrid), x_blasso, label="BLASSO")
 
     repr_std = 1.5
     representation_kernel = 1/(np.sqrt(2 * np.pi * repr_std**2)) * np.exp(-0.5 * np.arange(-3 * repr_std, 3 * repr_std + 1)**2 / repr_std**2)
 
-    fig = plt.figure(figsize=(12, 16))
+    fig = plt.figure(figsize=(16, 16))
     plt.suptitle("Foreground representation: convolution with a narrow Gaussian kernel")
     repr_source = np.convolve(img, representation_kernel, mode='same')
     repr_recovered = np.convolve(x1, representation_kernel, mode='same')
+    repr_ndcp = np.convolve(x1_ndcp, representation_kernel, mode='same')
     repr_blasso = np.convolve(x_blasso, representation_kernel, mode='same')
-    ylim = max(repr_source.max(), repr_recovered.max())
-    axes = fig.subplots(3, 1, sharex=True)
-    ax = axes[0]
+    ylim = max(repr_source.max(), repr_recovered.max(), repr_ndcp.max())
+    axes = fig.subplots(2, 2, sharex=True)
+    ax = axes.ravel()[0]
     ax.set_ylim(top=1.05 * ylim)
-    # ax.stem(repr_source)
     ax.plot(np.arange(Ngrid), repr_source, c='orange', marker='.')
     ax.set_title("Source foreground")
-    ax = axes[1]
+    ax = axes.ravel()[1]
     ax.set_ylim(top=1.05 * ylim)
-    # ax.stem(repr_recovered)
     ax.plot(np.arange(Ngrid), repr_recovered, c='orange', marker='.')
     ax.set_title("Recovered foreground")
-    ax = axes[2]
+    ax = axes.ravel()[2]
+    ax.set_ylim(top=1.05 * ylim)
+    ax.plot(np.arange(Ngrid), repr_ndcp, c='orange', marker='.')
+    ax.set_title("Non-decoupled foreground")
+    ax = axes.ravel()[3]
     ax.set_ylim(top=1.05 * ylim)
     ax.plot(np.arange(Ngrid), repr_blasso, c='orange', marker='.')
     ax.set_title("BLASSO foreground")
     plt.show()
 
+    # ------------------------------------------------
+
+    print(f"Reconstruction times:")
+    print(f"\tDecoupled: {pgd_time:.2f}s")
+    print(f"\tNon-decoupled: {ndcp_time:.2f}s")
+    print(f"\tBLASSO: {blasso_time:.2f}s")
+
     print(f"Relative L2 error on the foreground:")
     print(f"\tComposite: {np.linalg.norm(repr_recovered - repr_source)/np.linalg.norm(repr_source):.2f}")
+    print(f"\tNon-decoupled: {np.linalg.norm(repr_ndcp - repr_source)/np.linalg.norm(repr_source):.2f}")
     print(f"\tBLASSO: {np.linalg.norm(repr_blasso - repr_source)/np.linalg.norm(repr_source):.2f}")
 
 
@@ -347,20 +408,25 @@ if __name__ == "__main__":
     data_fid_val = 0.5 * np.linalg.norm(y - sol_meas)**2
     print(f"Approximate value of the data fidelity at convergence: {data_fid_val:.3e}")
 
-    # Wasserstein distance between siomulated source and sparse reconstructin, using scipy
+    # Wasserstein distance between simulated source and sparse reconstruction, using scipy
     from scipy.stats import wasserstein_distance
     img_sum, x1_sum = img.sum(), x1.sum()
-    print(f"Sum of source: {img_sum:.3f}, sum of recovered: {x1_sum:.3f}, sum of BLASSO: {x_blasso.sum():.3f}")
-    print(f"Sum of source after convolution: {repr_source.sum():.3f}, sum of recovered: {repr_recovered.sum():.3f}, sum of BLASSO: {repr_blasso.sum():.3f}")
+    print(f"Sum of source: {img_sum:.3f}, sum of recovered: {x1_sum:.3f},"
+          f"sum of non-decoupled: {x1_ndcp.sum():.3f} , sum of BLASSO: {x_blasso.sum():.3f}")
+    print(f"Sum of source after convolution: {repr_source.sum():.3f}, sum of recovered: {repr_recovered.sum():.3f},"
+          f"sum of non-decoupled: {repr_ndcp.sum():.3f}, sum of BLASSO: {repr_blasso.sum():.3f}")
 
     wass_dist = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), img/img_sum, x1/x1_sum)
     print(f"Wasserstein distance between source and recovered: {wass_dist:.3f}")
-    # wasserstein distance with BLASSO
+    wass_dist_ndcp = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), img/img_sum, x1_ndcp/x1_ndcp.sum())
+    print(f"Wasserstein distance between source and non-decoupled: {wass_dist_ndcp:.3f}")
     wass_dist_blasso = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), img/img_sum, x_blasso/x_blasso.sum())
     print(f"Wasserstein distance between source and BLASSO: {wass_dist_blasso:.3f}")
 
     #Wasserstein distance after convolution
     wass_dist_repr = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), repr_source, repr_recovered)
     print(f"Wasserstein distance between source and recovered (after convolution): {wass_dist_repr:.3f}")
+    wass_dist_repr_ndcp = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), repr_source, repr_ndcp)
+    print(f"Wasserstein distance between source and non-decoupled (after convolution): {wass_dist_repr_ndcp:.3f}")
     wass_dist_repr_blasso = wasserstein_distance(np.arange(Ngrid), np.arange(Ngrid), repr_source, repr_blasso)
     print(f"Wasserstein distance between source and BLASSO (after convolution): {wass_dist_repr_blasso:.3f}")
