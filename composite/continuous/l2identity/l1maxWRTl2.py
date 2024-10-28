@@ -193,8 +193,9 @@ if __name__ == "__main__":
     plt.yscale('log')
     for l in res:
         plt.scatter(l2s, l, marker='+')
-    plt.vlines(lip_cogram, min(l), max(l), label="Lipschitz cogram")
+    plt.vlines(lip_cogram, min(l), max(l), label="Lipschitz of cogram op")
     plt.legend()
+    plt.title(r"$\lambda_{1, max}$ w.r.t. $\lambda_2$")
     plt.show()
 
 
