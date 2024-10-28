@@ -11,7 +11,6 @@ import scipy.signal as sig
 
 #image model
 seed = None
-sbgrdb = 40
 Ngrid = 800
 ds_factor = 8
 Nmeas = Ngrid // ds_factor
@@ -34,8 +33,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, help='Seed', default=None)
-    parser.add_argument('--fgbgR', type=float, help='Name of the person', default=10.)
-    parser.add_argument('--snr', type=float, help='Age of the person', default=20.)
+    parser.add_argument('--fgbgR', type=float, default=10.)
+    parser.add_argument('--snr', type=float, default=20.)
 
     args = parser.parse_args()
 
