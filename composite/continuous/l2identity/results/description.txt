@@ -25,7 +25,7 @@ Quality of reconstruction:
 	- 1.3 starts to mess up, not as good as the other ones but still pretty decent
 	- even 2.3 is fairly well recovered (the background is quite nice is this scenario)
 	- 3.1 is not recovering good, two explanations:
-		- the backgroudn is quite nasty
+		- the background is quite nasty
 		- the set of parameters is not properly adapted
 			-> I could try lambda2 lower and lambda1 higher
 	- 3.2 works actually better
@@ -41,3 +41,10 @@ Quality of reconstruction:
 	
 Specific fine analysis:
 	- For 1.2, the visually best situation is lambda1_f = 0.2 and lambda2 = 1e-3
+	
+---------------------------------
+Second batch of tests (using r_12) to measure relative contribution of components in the measurements.
+
+Seed:
+	400 -> SNR = 20dB, r12 = 1., fgbgR = 10.
+	746 -> SNR = 10dB, r12 = 1., fgbgR = 10.
