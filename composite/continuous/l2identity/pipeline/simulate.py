@@ -10,18 +10,15 @@ import numpy as np
 import scipy.signal as sig
 
 #image model
-seed = None
 Ngrid = 800
 ds_factor = 8
 Nmeas = Ngrid // ds_factor
-sparsity = 0.3
 k = 10
 ongrid = True
 
 # measurement model
 kernel_std = 5  # Gaussian kernel std
 kernel_width = 3 * 2 * kernel_std + 1  # Length of the Gaussian kernel
-snrdb_meas = 60
 norm_meas = (np.sqrt(2 * np.pi) * kernel_std)
 
 # background model
@@ -35,23 +32,24 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, help='Seed', default=None)
     parser.add_argument('--fgbgR', type=float, default=10.)
     parser.add_argument('--snr', type=float, default=20.)
+    parser.add_argument('--r12', type=float, default=1.)
 
     args = parser.parse_args()
 
     if args.seed:
         seed = int(args.seed)
-    elif seed is None:
+    else:
         seed = np.random.randint(1000)
 
     snrdb_meas = args.snr
     max_intensity = args.fgbgR
+    r12 = args.r12
 
     rng = np.random.default_rng(seed=seed)
 
     img = np.zeros((Ngrid,))
     if ongrid:
         Neff = int(.6 * Ngrid)
-        # k = int(Ngrid * sparsity)
         idx = rng.choice(Neff, k, replace=False)
         indices = idx + int(.2 * Ngrid)
         img[indices] = rng.uniform(1, max_intensity, k)
@@ -69,13 +67,12 @@ if __name__ == "__main__":
         kernel_bg_1d /= norm_bg1d
         background = sig.fftconvolve(bg_impulses, kernel_bg_1d, mode='same')
 
-    x = img + background
-
     # Continuous-time convolution and evaluate on the coarse grid
     kernel_measurement = np.exp(-0.5 * ((np.arange(kernel_width) - (kernel_width - 1) / 2) ** 2) / (kernel_std ** 2))
     kernel_measurement /= norm_meas
 
     conv_fg = np.convolve(np.pad(img, (kernel_width//2, kernel_width//2), mode='wrap'), kernel_measurement, mode='valid')
+    meas_fg = conv_fg[ds_factor//2::ds_factor]
 
     std_meas_bg2 = kernel_std**2 + kernel_std_bg**2
     width_meas_bg = 3 * 2 * np.ceil(np.sqrt(std_meas_bg2)).astype(int) + 1
@@ -85,7 +82,13 @@ if __name__ == "__main__":
 
     conv_bg = np.convolve(np.pad(bg_impulses, (width_meas_bg//2, width_meas_bg//2), mode='wrap'),
                                                kernel_meas_bg, mode='valid')
-    # assert conv_bg.shape == background.shape
+    meas_bg = conv_bg[ds_factor//2::ds_factor]
+
+    factor = r12 * np.linalg.norm(meas_bg) / np.linalg.norm(meas_fg)
+    img *= factor
+    meas_fg *= factor
+
+    x = img + background
     noiseless_y = (conv_fg + conv_bg)[ds_factor//2::ds_factor]
 
     sigma_noise = np.linalg.norm(noiseless_y)/Nmeas * 10**(-snrdb_meas / 20)
