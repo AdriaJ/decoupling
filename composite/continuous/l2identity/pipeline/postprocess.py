@@ -17,6 +17,9 @@ import matplotlib.pyplot as plt
 
 data_path = "/home/jarret/PycharmProjects/decoupling/composite/continuous/l2identity/pipeline/data"
 
+def relL2Error(reco, source):
+    return np.linalg.norm(reco - source) / np.linalg.norm(source)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, help='Seed', required=True)
@@ -25,8 +28,9 @@ if __name__ == "__main__":
     parser.add_argument('--l2', type=float, help='Value of lambda2 (composite)', default=[1.], nargs='*')
     parser.add_argument('--lf', type=float, help='Factor for lambda (BLASSO)', default=[.1], nargs='*')
 
-    parser.add_argument('--fgbgR', type=float, help='Name of the person', default=10.)
-    parser.add_argument('--snr', type=float, help='Age of the person', default=20.)
+    parser.add_argument('--fgbgR', type=float, default=10.)
+    parser.add_argument('--snr', type=float, default=20.)
+    parser.add_argument('--r12', type=float, default=1.)
 
     parser.add_argument('--composite', action='store_true')
     parser.add_argument('--blasso', action='store_true')
@@ -60,7 +64,7 @@ if __name__ == "__main__":
     plt.subplot(414)
     plt.title("Measurements")
     plt.stem(data["measurements"])
-    plt.suptitle(f"fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB")
+    plt.suptitle(f"fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB")
     if args.save:
         plt.savefig(os.path.join(save_path, "data.png"))
     else:
@@ -90,7 +94,7 @@ if __name__ == "__main__":
                    ylabel=rf"$\lambda_2 = {reco['lambda2'][0]:.2e}$")
             ax.label_outer()
             i += 1
-        fig.suptitle(f"Foreground (fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB)")
+        fig.suptitle(f"Foreground (fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB)")
         if args.save:
             plt.savefig(os.path.join(save_path, "foreground.png"))
         else:
@@ -108,7 +112,7 @@ if __name__ == "__main__":
                    ylabel=rf"$\lambda_2 = {reco['lambda2'][0]:.2e}$")
             ax.label_outer()
             i += 1
-        fig.suptitle(f"Background (fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB)")
+        fig.suptitle(f"Background (fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB)")
         if args.save:
             plt.savefig(os.path.join(save_path, "background.png"))
         else:
@@ -139,7 +143,7 @@ if __name__ == "__main__":
                        ylabel=rf"$\lambda_2 = {reco['lambda2'][0]:.2e}$")
                 ax.label_outer()
                 i += 1
-            fig.suptitle(f"Merged foreground (fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB)")
+            fig.suptitle(f"Merged foreground (fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB)")
             if args.save:
                 plt.savefig(os.path.join(save_path, "foreground_merged.png"))
             else:
@@ -148,13 +152,14 @@ if __name__ == "__main__":
             plt.figure()
             repr_source = np.convolve(data["img"], representation_kernel, mode="same")
             plt.plot(np.arange(repr_source.shape[0]), repr_source, c='orange', marker='.')
-            fig.suptitle(f"Source foreground (fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB)")
+            fig.suptitle(f"Source foreground (fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB)")
             if args.save:
                 plt.savefig(os.path.join(save_path, "foreground_merged_source.png"))
             else:
                 plt.show()
 
         comp_times = np.array([reco['t'][0] for reco in comp_recos]).reshape(Nrows, Ncols)
+        errors_comp = np.array([relL2Error(reco["x1"], data["img"]) for reco in comp_recos]).reshape(Nrows, Ncols)
         print(r"Composite reconstruction times : row = $\lambda_2$, column = $\lambda_1$")
         print(comp_times)
 
@@ -178,7 +183,7 @@ if __name__ == "__main__":
             ax.stem(reco["x"])
             ax.set_title(rf"$\lambda = {reco['lambda_'][0]:.2e}    (f: {args.lf[i]:.2f})$")
             i += 1
-        fig.suptitle(f"BLASSO foreground (fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB)")
+        fig.suptitle(f"BLASSO foreground (fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB)")
         if args.save:
             plt.savefig(os.path.join(save_path, "blasso.png"))
         else:
@@ -199,16 +204,29 @@ if __name__ == "__main__":
                 ax.plot(np.arange(repr_reco.shape[0]), repr_reco, c='orange', marker='.')
                 ax.set_title(rf"$\lambda = {reco['lambda_'][0]:.2e}    (f: {args.lf[i]:.2f})$")
                 i += 1
-            fig.suptitle(f"BLASSO convolved(fgbgR: {args.fgbgR:.1f}, SNR: {args.snr:.1f} dB)")
+            fig.suptitle(f"BLASSO convolved(fgbgR: {args.fgbgR:.1f}, $r_{12}$: {args.r12:.1f}, SNR: {args.snr:.1f} dB)")
             if args.save:
                 plt.savefig(os.path.join(save_path, "blasso_merged.png"), dpi=300)
             else:
                 fig.show()
 
         blasso_times = np.array([reco['t'][0] for reco in blasso_recos])
+        errors_blasso = np.array([relL2Error(reco["x"], data["img"]) for reco in blasso_recos])
         print("BLASSO reconstruction times")
         print(args.lf)
         print(blasso_times)
 
     # todo : add metric evaluation
     # Make a table with reconstruciton time
+
+    print(r"Composite relative L2 errors : row = $\lambda_2$, column = $\lambda_1$")
+    print(errors_comp)
+    print(r"BLASSO relative L2 errors")
+    print(errors_blasso)
+
+    print(filenames_comp)
+    print(filenames_blasso)
+
+    print("Pairs of parameters values:")
+    print([[(f"{l2:.2e}, {l1:.2e}") for l1 in args.l1f] for l2 in args.l2])
+    print([f"{l:.2e}" for l in args.lf])
