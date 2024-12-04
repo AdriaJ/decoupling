@@ -23,18 +23,19 @@ from matplotlib import use
 use("Qt5Agg")
 
 #image model
-seed = 1
+seed = 746
 Ngrid = 800
 ds_factor = 8
 Nmeas = Ngrid // ds_factor
 k = 10
 fgbgR = 10.
 ongrid = True
+r12 = 1.  # rate between l2 norm of fg observations and bg observations
 
 # measurement model
 kernel_std = 5  # Gaussian kernel std
 kernel_width = 3 * 2 * kernel_std + 1  # Length of the Gaussian kernel
-snrdb_meas = 20
+snrdb_meas = 10
 norm_meas = (np.sqrt(2 * np.pi) * kernel_std)
 
 # regularization
@@ -82,7 +83,7 @@ if __name__ == "__main__":
 
     # img *= 0.5
 
-    x = img + background
+    # x = img + background
 
     # plt.figure()
     # plt.subplot(311)
@@ -99,6 +100,7 @@ if __name__ == "__main__":
     kernel_measurement /= norm_meas
 
     conv_fg = np.convolve(np.pad(img, (kernel_width//2, kernel_width//2), mode='wrap'), kernel_measurement, mode='valid')
+    meas_fg = conv_fg[ds_factor//2::ds_factor]
 
     std_meas_bg2 = kernel_std**2 + kernel_std_bg**2
     width_meas_bg = 3 * 2 * np.ceil(np.sqrt(std_meas_bg2)).astype(int) + 1
@@ -108,12 +110,64 @@ if __name__ == "__main__":
 
     conv_bg = np.convolve(np.pad(bg_impulses, (width_meas_bg//2, width_meas_bg//2), mode='wrap'),
                                                kernel_meas_bg, mode='valid')
-    # assert conv_bg.shape == background.shape
-    noiseless_y = (conv_fg + conv_bg)[ds_factor//2::ds_factor]
+    meas_bg = conv_bg[ds_factor//2::ds_factor]
+
+    if r12:
+        factor = r12 * np.linalg.norm(meas_bg) / np.linalg.norm(meas_fg)
+        img *= factor
+        meas_fg *= factor
+
+    x = img + background
+    noiseless_y = meas_fg + meas_bg
+
+    # # Relative importance of the contribution of each signal in the measurements
+    # meas_fg = conv_fg[ds_factor//2::ds_factor]
+    # print("Foreground:")
+    # print(f"\tL2 norm: {np.linalg.norm(meas_fg):.2f}")
+    # print(f"\tL1 norm: {np.abs(meas_fg).sum():.2f}")
+    # print(f"\tMax measurements: {np.abs(meas_fg).max():.2f}")
+    # print(f"\tMax signal: {np.abs(img).max():.2f}")
+    # print(f"\tMean signal: {np.abs(img[img != 0]).mean():.2f}")
+    #
+    # meas_bg = conv_bg[ds_factor//2::ds_factor]
+    # print("Background:")
+    # print(f"\tL2 norm: {np.linalg.norm(meas_bg):.2f}")
+    # print(f"\tL1 norm: {np.abs(meas_bg).sum():.2f}")
+    # print(f"\tMax measurements: {np.abs(meas_bg).max():.2f}")
+    # print(f"\tMax signal (before convolution): {np.abs(bg_impulses).max():.2f}")
+    # print(f"\tMean signal (before convolution): {np.abs(bg_impulses[bg_impulses != 0]).mean():.2f}")
+    #
+    # print("Rate between the two signals (fg to bg):")
+    # print(f"\tL2 norm: {np.linalg.norm(meas_fg) / np.linalg.norm(meas_bg):.2f}")
+    # print(f"\tL1 norm: {np.abs(meas_fg).sum() / np.abs(meas_bg).sum():.2f}")
 
     sigma_noise = np.linalg.norm(noiseless_y)/Nmeas * 10**(-snrdb_meas / 20)
     noise_meas = rng.normal(0, sigma_noise, noiseless_y.shape)
     y = noiseless_y + noise_meas
+
+    yrange = [min(3*y.min(), y.min()-0.05), 1.05*y.max()]
+    plt.figure(figsize=(15, 4))
+    plt.subplot(131)
+    plt.stem(meas_fg, basefmt="C7--", linefmt="C7-", markerfmt='gx')
+    plt.title("Observations on the foreground")
+    plt.ylim(yrange)
+    plt.subplot(132)
+    plt.stem(meas_bg, basefmt="C7--", linefmt="C7-", markerfmt='gx')
+    plt.title("Observations on the background")
+    plt.ylim(yrange)
+    plt.subplot(133)
+    plt.stem(y, basefmt="C7--", linefmt="C7-", markerfmt='gx')
+    plt.title("Noisy measurements")
+    plt.ylim(yrange)
+    fig = plt.gcf()
+    for ax in fig.axes:
+        ax.label_outer()
+    save_pdf = True
+    if save_pdf:
+        import os
+        figures_path = "/home/jarret/PycharmProjects/decoupling/composite/continuous/l2identity/pipeline/figures"
+        plt.savefig(os.path.join(figures_path, "measurements.pdf"))
+    plt.show()
 
     # plt.figure(figsize=(12, 5))
     # plt.suptitle("Measurements on the fine grid")
@@ -261,7 +315,7 @@ if __name__ == "__main__":
 
     ndcp_pgd = pxls.PGD(ndcp_loss, g=ndcp_regul, show_progress=False)
     start = time.time()
-    ndcp_pgd.fit(x0=np.zeros(Ngrid + Nmeas), stop_crit=stop_crit)
+    ndcp_pgd.fit(x0=np.zeros(Ngrid + Nmeas), stop_crit=ndcp_stop)
     ndcp_time = time.time() - start
 
     ndcp_sol, ndcp_hst = ndcp_pgd.stats()

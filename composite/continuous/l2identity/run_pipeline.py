@@ -1,5 +1,5 @@
 """
-Run the simulation and reconstruciton pipeline.
+Run the simulation and reconstruction pipeline.
 """
 import subprocess
 import os
@@ -7,8 +7,9 @@ import numpy as np
 
 seed = None
 
-fgbgR = 2
-snrdb = 0
+fgbgR = 10
+snrdb = 10
+r12 = 1.
 
 l1fs = [0.05, .1, .2, .3]  # [0.05, .1, 0.2]
 l2s = [1e-4, 1e-3, 1e-2, 1e-1]  # [.1, 1., 10.]
@@ -30,7 +31,11 @@ if __name__ == "__main__":
     print(f"Running pipeline with seed: {seed}")
 
     # optional arguments: '--fgbgR 10. --snr 20.'
-    run_script(os.path.join(pipeline_path, "simulate.py"), f"--seed",  f"{seed:d}", "--fgbgR", str(fgbgR), "--snr", str(snrdb))
+    run_script(os.path.join(pipeline_path, "simulate.py"),
+               f"--seed",  f"{seed:d}",
+               "--fgbgR", str(fgbgR),
+               "--snr", str(snrdb),
+               "--r12", str(r12))
     # optional arguments: "--eps 1e-5"
     run_script(os.path.join(pipeline_path, "reconstruct.py"),
                "--seed", f"{seed:d}",
